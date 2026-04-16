@@ -2,23 +2,26 @@
 @model IEnumerable<Gugeditu.Web.Models.CoordinateDeviceViewModel>
 @{
     ViewData["Title"] = "设备地图";
-    var mapApiKey = Context.RequestServices.GetRequiredService<IConfiguration>()["GoogleMaps:ApiKey"];
     var pointsJson = JsonSerializer.Serialize(Model);
 }
 
-<div class="mb-3">
-    <h1 class="h3">设备地图（Google Maps）</h1>
-    <p class="mb-0">展示一个中国大陆设备（省份级）和一个美国设备。</p>
+<link rel="stylesheet" href="~/lib/leaflet/dist/leaflet.css" asp-append-version="true" />
+
+<div style="display:flex; justify-content:space-between; align-items:center;" class="mb-2">
+    <div>
+        <h1 class="h3" style="margin:0;">设备地图</h1>
+        <p style="margin:0;color:#555;">展示一个中国大陆设备（广东省）和一个美国设备（加利福尼亚州）</p>
+    </div>
 </div>
 
-<div id="device-map" style="height: 520px; width: 100%; border: 1px solid #ddd;"></div>
+<div id="device-map" style="height: 520px; width: 100%; border: 1px solid #ccc; border-radius:4px;"></div>
 
 <table class="table table-striped mt-3">
     <thead>
         <tr>
             <th>SN</th>
             <th>国家/地区</th>
-            <th>坐标</th>
+            <th>坐标（十进制度）</th>
             <th>上报时间(UTC)</th>
             <th>速度(km/h)</th>
             <th>方向</th>
@@ -42,47 +45,47 @@
 </table>
 
 @section Scripts {
+    <script src="~/lib/leaflet/dist/leaflet.js" asp-append-version="true"></script>
     <script>
-        const points = @Html.Raw(pointsJson);
+        (function () {
+            const points = @Html.Raw(pointsJson);
 
-        function initMap() {
-            const map = new google.maps.Map(document.getElementById("device-map"), {
-                center: { lat: 20, lng: 105 },
-                zoom: 2,
-                mapTypeControl: true,
-            });
+            // initialise map with a light grey ocean background
+            const map = L.map('device-map', { zoomControl: true });
+            document.getElementById('device-map').style.background = '#d4e7f5';
 
-            const bounds = new google.maps.LatLngBounds();
+            // load bundled world GeoJSON (countries-110m, no network required)
+            fetch('/data/countries.geojson')
+                .then(function (r) { return r.json(); })
+                .then(function (geojson) {
+                    L.geoJSON(geojson, {
+                        style: {
+                            color: '#888',
+                            weight: 0.6,
+                            fillColor: '#e8e0d4',
+                            fillOpacity: 1
+                        }
+                    }).addTo(map);
 
-            points.forEach((p) => {
-                const position = { lat: p.lat, lng: p.lon };
-                const marker = new google.maps.Marker({
-                    position,
-                    map,
-                    title: `${p.sn} (${p.country}-${p.region})`
+                    // add markers after the layer is ready
+                    const bounds = [];
+                    points.forEach(function (p) {
+                        const latlng = [p.Lat, p.Lon];
+                        bounds.push(latlng);
+                        const marker = L.marker(latlng).addTo(map);
+                        marker.bindPopup(
+                            '<strong>' + p.Sn + '</strong><br/>' +
+                            p.Country + ' — ' + p.Region + '<br/>' +
+                            '速度: ' + p.Speed + ' km/h<br/>' +
+                            '方向: ' + p.Direction + '°<br/>' +
+                            '电量: ' + p.Power + '%'
+                        );
+                    });
+
+                    if (bounds.length > 0) {
+                        map.fitBounds(bounds, { padding: [80, 80] });
+                    }
                 });
-
-                const info = new google.maps.InfoWindow({
-                    content: `<div><strong>${p.sn}</strong><br/>${p.country} - ${p.region}<br/>速度: ${p.speed} km/h<br/>电量: ${p.power}%</div>`
-                });
-
-                marker.addListener("click", () => info.open({ anchor: marker, map }));
-                bounds.extend(position);
-            });
-
-            map.fitBounds(bounds, 80);
-        }
+        }());
     </script>
-
-    @if (string.IsNullOrWhiteSpace(mapApiKey))
-    {
-        <div class="alert alert-warning mt-3" role="alert">
-            未配置 Google Maps API Key。请在 <code>appsettings.json</code> 中设置 <code>GoogleMaps:ApiKey</code>。
-        </div>
-        <script src="https://maps.googleapis.com/maps/api/js?callback=initMap" async defer></script>
-    }
-    else
-    {
-        <script src="https://maps.googleapis.com/maps/api/js?key=@mapApiKey&callback=initMap" async defer></script>
-    }
 }

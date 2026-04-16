@@ -28,7 +28,7 @@ public class HomeController : Controller
                 Country = "美国",
                 Region = "California",
                 Lat = ConvertDdmmToDecimal(3746.4940),
-                Lon = ConvertDdmmToDecimal(12225.1640),
+                Lon = -ConvertDdmmToDecimal(12225.1640),   // West longitude
                 ReportingTime = DateTime.Parse("2026-04-16T08:22:00Z"),
                 Speed = 45.2,
                 Direction = 82.3,
