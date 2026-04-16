@@ -1,0 +1,88 @@
+@using System.Text.Json
+@model IEnumerable<Gugeditu.Web.Models.CoordinateDeviceViewModel>
+@{
+    ViewData["Title"] = "设备地图";
+    var mapApiKey = Context.RequestServices.GetRequiredService<IConfiguration>()["GoogleMaps:ApiKey"];
+    var pointsJson = JsonSerializer.Serialize(Model);
+}
+
+<div class="mb-3">
+    <h1 class="h3">设备地图（Google Maps）</h1>
+    <p class="mb-0">展示一个中国大陆设备（省份级）和一个美国设备。</p>
+</div>
+
+<div id="device-map" style="height: 520px; width: 100%; border: 1px solid #ddd;"></div>
+
+<table class="table table-striped mt-3">
+    <thead>
+        <tr>
+            <th>SN</th>
+            <th>国家/地区</th>
+            <th>坐标</th>
+            <th>上报时间(UTC)</th>
+            <th>速度(km/h)</th>
+            <th>方向</th>
+            <th>电量</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>@item.Sn</td>
+                <td>@item.Country / @item.Region</td>
+                <td>@item.Lat.ToString("F6"), @item.Lon.ToString("F6")</td>
+                <td>@item.ReportingTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                <td>@item.Speed.ToString("F1")</td>
+                <td>@item.Direction.ToString("F1")°</td>
+                <td>@item.Power%</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@section Scripts {
+    <script>
+        const points = @Html.Raw(pointsJson);
+
+        function initMap() {
+            const map = new google.maps.Map(document.getElementById("device-map"), {
+                center: { lat: 20, lng: 105 },
+                zoom: 2,
+                mapTypeControl: true,
+            });
+
+            const bounds = new google.maps.LatLngBounds();
+
+            points.forEach((p) => {
+                const position = { lat: p.lat, lng: p.lon };
+                const marker = new google.maps.Marker({
+                    position,
+                    map,
+                    title: `${p.sn} (${p.country}-${p.region})`
+                });
+
+                const info = new google.maps.InfoWindow({
+                    content: `<div><strong>${p.sn}</strong><br/>${p.country} - ${p.region}<br/>速度: ${p.speed} km/h<br/>电量: ${p.power}%</div>`
+                });
+
+                marker.addListener("click", () => info.open({ anchor: marker, map }));
+                bounds.extend(position);
+            });
+
+            map.fitBounds(bounds, 80);
+        }
+    </script>
+
+    @if (string.IsNullOrWhiteSpace(mapApiKey))
+    {
+        <div class="alert alert-warning mt-3" role="alert">
+            未配置 Google Maps API Key。请在 <code>appsettings.json</code> 中设置 <code>GoogleMaps:ApiKey</code>。
+        </div>
+        <script src="https://maps.googleapis.com/maps/api/js?callback=initMap" async defer></script>
+    }
+    else
+    {
+        <script src="https://maps.googleapis.com/maps/api/js?key=@mapApiKey&callback=initMap" async defer></script>
+    }
+}
