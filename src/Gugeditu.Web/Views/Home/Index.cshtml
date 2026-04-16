@@ -54,38 +54,48 @@
             const map = L.map('device-map', { zoomControl: true });
             document.getElementById('device-map').style.background = '#d4e7f5';
 
-            // load bundled world GeoJSON (countries-110m, no network required)
-            fetch('/data/countries.geojson')
-                .then(function (r) { return r.json(); })
-                .then(function (geojson) {
-                    L.geoJSON(geojson, {
-                        style: {
-                            color: '#888',
+            // four distinct pastel fill colours (four-colour theorem)
+            const FOUR_COLORS = ['#a8d8a8', '#f9d89c', '#a8c8e8', '#f4a0a0'];
+
+            // load colour assignment and GeoJSON in parallel
+            Promise.all([
+                fetch('/data/country-colors.json').then(function (r) { return r.json(); }),
+                fetch('/data/countries.geojson').then(function (r) { return r.json(); })
+            ]).then(function (results) {
+                const colorMap = results[0];
+                const geojson  = results[1];
+
+                L.geoJSON(geojson, {
+                    style: function (feature) {
+                        const idx = colorMap[feature.id];
+                        return {
+                            color: '#666',
                             weight: 0.6,
-                            fillColor: '#e8e0d4',
+                            fillColor: FOUR_COLORS[idx] || FOUR_COLORS[0],
                             fillOpacity: 1
-                        }
-                    }).addTo(map);
-
-                    // add markers after the layer is ready
-                    const bounds = [];
-                    points.forEach(function (p) {
-                        const latlng = [p.Lat, p.Lon];
-                        bounds.push(latlng);
-                        const marker = L.marker(latlng).addTo(map);
-                        marker.bindPopup(
-                            '<strong>' + p.Sn + '</strong><br/>' +
-                            p.Country + ' — ' + p.Region + '<br/>' +
-                            '速度: ' + p.Speed + ' km/h<br/>' +
-                            '方向: ' + p.Direction + '°<br/>' +
-                            '电量: ' + p.Power + '%'
-                        );
-                    });
-
-                    if (bounds.length > 0) {
-                        map.fitBounds(bounds, { padding: [80, 80] });
+                        };
                     }
+                }).addTo(map);
+
+                // add markers after the layer is ready
+                const bounds = [];
+                points.forEach(function (p) {
+                    const latlng = [p.Lat, p.Lon];
+                    bounds.push(latlng);
+                    const marker = L.marker(latlng).addTo(map);
+                    marker.bindPopup(
+                        '<strong>' + p.Sn + '</strong><br/>' +
+                        p.Country + ' — ' + p.Region + '<br/>' +
+                        '速度: ' + p.Speed + ' km/h<br/>' +
+                        '方向: ' + p.Direction + '°<br/>' +
+                        '电量: ' + p.Power + '%'
+                    );
                 });
+
+                if (bounds.length > 0) {
+                    map.fitBounds(bounds, { padding: [80, 80] });
+                }
+            });
         }());
     </script>
 }
