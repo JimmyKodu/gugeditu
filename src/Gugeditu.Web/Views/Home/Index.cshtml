@@ -1,0 +1,221 @@
+@{
+    ViewData["Title"] = "设备地图 - China / US";
+}
+
+<div class="map-toolbar">
+    <div class="toolbar-group" role="radiogroup" aria-label="区域选择">
+        <label><input type="radio" name="region" value="cn" checked /> 中国大陆（省份）</label>
+        <label><input type="radio" name="region" value="us" /> 美国（各州）</label>
+    </div>
+
+    <div class="toolbar-group">
+        <label class="switch" title="打开后将走服务器跨境代理直连 maps.googleapis.com；关闭时走 maps.google.cn 国内镜像，避免 ERR_CONNECTION_TIMED_OUT。">
+            <input type="checkbox" id="crossBorderSwitch" />
+            <span class="slider"></span>
+            <span class="switch-label">跨境连接</span>
+        </label>
+        <span id="scriptSourceHint" class="hint">当前：国内镜像 maps.google.cn</span>
+    </div>
+
+    <div class="toolbar-group">
+        <span id="statusHint" class="hint"></span>
+    </div>
+</div>
+
+<div id="map" class="map-view"></div>
+
+@section Styles {
+    <style>
+        .map-toolbar {
+            display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;
+            padding: .6rem 1rem; background:#f6f8fa; border:1px solid #d0d7de;
+            border-radius: 6px; margin-bottom: .75rem;
+        }
+        .toolbar-group { display: flex; gap: .75rem; align-items: center; }
+        .map-view { width: 100%; height: 70vh; min-height: 480px; border:1px solid #d0d7de; border-radius: 6px; }
+        .hint { color:#57606a; font-size: 0.9rem; }
+
+        /* iOS 风格开关 */
+        .switch { position: relative; display: inline-flex; align-items: center; gap:.5rem; cursor: pointer; user-select: none; }
+        .switch input { position:absolute; opacity:0; width:0; height:0; }
+        .switch .slider {
+            position: relative; width: 40px; height: 22px; background:#cbd5e1; border-radius: 22px; transition: background .2s;
+        }
+        .switch .slider::before {
+            content:""; position:absolute; left:2px; top:2px; width:18px; height:18px;
+            background:#fff; border-radius:50%; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+            transition: transform .2s;
+        }
+        .switch input:checked + .slider { background:#2da44e; }
+        .switch input:checked + .slider::before { transform: translateX(18px); }
+    </style>
+}
+
+@section Scripts {
+    <script>
+        // 视图内联脚本：负责拉取地图配置 -> 动态注入 Google Maps JS ->
+        // 从 /api/devices/* 拉取坐标 -> 在地图上绘制标记。
+        (function () {
+            const mapEl       = document.getElementById('map');
+            const statusHint  = document.getElementById('statusHint');
+            const sourceHint  = document.getElementById('scriptSourceHint');
+            const crossSwitch = document.getElementById('crossBorderSwitch');
+            const regionRadios = document.querySelectorAll('input[name="region"]');
+
+            let mapsConfig = null;
+            let map = null;
+            let markers = [];
+            let currentScriptTag = null;
+            let mapsLoaded = false;
+
+            function setStatus(text, isError) {
+                statusHint.textContent = text || '';
+                statusHint.style.color = isError ? '#cf222e' : '#57606a';
+            }
+
+            function clearMarkers() {
+                markers.forEach(m => m.setMap(null));
+                markers = [];
+            }
+
+            function currentRegion() {
+                const sel = document.querySelector('input[name="region"]:checked');
+                return sel ? sel.value : 'cn';
+            }
+
+            // 把 [-180, 180] 规范化
+            function lngNorm(x) { return ((x + 540) % 360) - 180; }
+
+            async function drawDevices(region) {
+                if (!mapsLoaded || !map) return;
+                clearMarkers();
+                setStatus('加载设备列表…');
+                try {
+                    const url = region === 'us' ? '/api/devices/us' : '/api/devices/china';
+                    const resp = await fetch(url);
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    const devices = await resp.json();
+
+                    const bounds = new google.maps.LatLngBounds();
+                    // 在中国区域使用 GCJ02 坐标以匹配 maps.google.cn 的底图偏移；
+                    // 美国（以及走 googleapis.com 原版）使用 WGS84 原始坐标。
+                    const useGcj = (region === 'cn' && !crossSwitch.checked);
+
+                    devices.forEach(d => {
+                        const lat = useGcj ? d.gcJ02Lat || d.gcJLat || d.lat : d.lat;
+                        const lng = useGcj ? d.gcJ02Lon || d.gcJLon || d.lon : d.lon;
+                        const position = { lat: lat, lng: lngNorm(lng) };
+                        const marker = new google.maps.Marker({
+                            position,
+                            map,
+                            title: `${d.region} (${d.sn})`,
+                        });
+                        const info = new google.maps.InfoWindow({
+                            content:
+                                `<div style="font-size:13px;line-height:1.45">
+                                    <div><b>${d.region}</b></div>
+                                    <div>SN：${d.sn}</div>
+                                    <div>上报：${new Date(d.reportingTime).toLocaleString()}</div>
+                                    <div>卫星：${d.satellites} 颗，信号：${d.signalStrength} dBm</div>
+                                    <div>电量：${d.power}%</div>
+                                 </div>`
+                        });
+                        marker.addListener('click', () => info.open({ anchor: marker, map }));
+                        markers.push(marker);
+                        bounds.extend(position);
+                    });
+
+                    if (devices.length) {
+                        map.fitBounds(bounds);
+                        // 给单国视图一个最小缩放，避免过度放大。
+                        const listener = google.maps.event.addListenerOnce(map, 'idle', () => {
+                            if (map.getZoom() > 6) map.setZoom(region === 'us' ? 4 : 4);
+                        });
+                    }
+                    setStatus(`已加载 ${devices.length} 台设备`);
+                } catch (err) {
+                    setStatus('加载设备失败：' + err.message, true);
+                }
+            }
+
+            // 当 Google Maps JS 加载完成后调用
+            window.initMap = function () {
+                mapsLoaded = true;
+                map = new google.maps.Map(mapEl, {
+                    center: { lat: 35, lng: 105 },
+                    zoom: 4,
+                    mapTypeControl: true,
+                });
+                drawDevices(currentRegion());
+            };
+
+            function buildScriptUrl() {
+                if (!mapsConfig) return null;
+                const base = crossSwitch.checked
+                    ? mapsConfig.proxyScriptBase
+                    : mapsConfig.cnScriptBase;
+                const params = new URLSearchParams();
+                params.set('callback', 'initMap');
+                if (mapsConfig.apiKey) params.set('key', mapsConfig.apiKey);
+                params.set('v', 'weekly');
+                return base + '?' + params.toString();
+            }
+
+            function loadMapsScript() {
+                // 卸载旧的脚本并重置 google 命名空间，以便切换数据源。
+                if (currentScriptTag) {
+                    currentScriptTag.remove();
+                    currentScriptTag = null;
+                }
+                mapsLoaded = false;
+                clearMarkers();
+                if (window.google && window.google.maps) {
+                    try { delete window.google; } catch (_) { window.google = undefined; }
+                }
+
+                const url = buildScriptUrl();
+                if (!url) return;
+                sourceHint.textContent = '当前：' +
+                    (crossSwitch.checked ? '跨境代理 ' + mapsConfig.proxyScriptBase
+                                         : '国内镜像 ' + mapsConfig.cnScriptBase);
+                setStatus('正在加载地图脚本…');
+
+                const s = document.createElement('script');
+                s.src = url;
+                s.async = true;
+                s.defer = true;
+                s.onerror = function () {
+                    setStatus('地图脚本加载失败，请检查网络或关闭 / 打开"跨境连接"开关重试。', true);
+                };
+                document.head.appendChild(s);
+                currentScriptTag = s;
+            }
+
+            // 切换国家时无需重载脚本，只重绘标记即可。
+            regionRadios.forEach(r => r.addEventListener('change', () => drawDevices(currentRegion())));
+
+            // 切换跨境开关时需要重新加载 Google Maps JS（数据源不同）。
+            crossSwitch.addEventListener('change', () => {
+                if (!mapsConfig.crossBorderEnabled && crossSwitch.checked) {
+                    crossSwitch.checked = false;
+                    setStatus('服务端已禁用跨境开关', true);
+                    return;
+                }
+                loadMapsScript();
+            });
+
+            // 启动：拉配置 -> 默认按"关"加载 maps.google.cn。
+            fetch('/api/config/maps')
+                .then(r => r.json())
+                .then(cfg => {
+                    mapsConfig = cfg;
+                    if (!cfg.crossBorderEnabled) {
+                        crossSwitch.disabled = true;
+                        crossSwitch.parentElement.title = '管理员已禁用跨境开关';
+                    }
+                    loadMapsScript();
+                })
+                .catch(err => setStatus('加载地图配置失败：' + err.message, true));
+        })();
+    </script>
+}
