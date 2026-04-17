@@ -1,0 +1,11 @@
+## Build artifacts
+bin/
+obj/
+
+## .NET user secrets / local tool outputs
+*.user
+.vs/
+
+## Python bytecode from tools/
+__pycache__/
+*.pyc
