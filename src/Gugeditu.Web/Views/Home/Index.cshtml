@@ -1,0 +1,426 @@
+@model Gugeditu.Web.Models.MapsConfig
+@{
+    ViewData["Title"] = "Google Maps 设备地图";
+}
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>@ViewData["Title"]</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            background: white;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .switch-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #667eea;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #38a169;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(72, 187, 120, 0.4);
+        }
+
+        .map-container {
+            margin: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+        }
+
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+
+        .status {
+            margin: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .status-label {
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .status-value {
+            color: #667eea;
+            font-weight: 500;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #718096;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🗺️ Google Maps 设备地图系统</h1>
+        <p>实时设备位置监控 - 支持中国大陆及国际地图服务</p>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <div class="switch-container">
+                <label class="switch">
+                    <input type="checkbox" id="chinaMainlandSwitch" @(Model.IsChinaMainland ? "checked" : "")>
+                    <span class="slider"></span>
+                </label>
+                <label for="chinaMainlandSwitch">
+                    <strong>中国大陆模式</strong>
+                    <span style="font-size: 12px; color: #718096; display: block;">
+                        开启后使用 maps.google.cn 避免连接超时
+                    </span>
+                </label>
+            </div>
+
+            <button class="btn btn-primary" onclick="loadChinaDevices()">
+                🇨🇳 显示中国设备
+            </button>
+
+            <button class="btn btn-secondary" onclick="loadUSADevices()">
+                🇺🇸 显示美国设备
+            </button>
+        </div>
+    </div>
+
+    <div class="status">
+        <div class="status-item">
+            <span class="status-label">当前API地址:</span>
+            <span class="status-value" id="apiUrlStatus">@Model.GetMapsApiUrl()</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">设备数量:</span>
+            <span class="status-value" id="deviceCount">0</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">地图状态:</span>
+            <span class="status-value" id="mapStatus">等待加载...</span>
+        </div>
+    </div>
+
+    <div class="map-container">
+        <div id="map"></div>
+    </div>
+
+    <script>
+        let map;
+        let markers = [];
+        let currentRegion = 'none';
+        let isChinaMainland = @(Model.IsChinaMainland ? "true" : "false");
+
+        // 初始化地图
+        function initMap() {
+            const mapOptions = {
+                zoom: 4,
+                center: { lat: 35.0, lng: 105.0 },
+                mapTypeId: 'roadmap'
+            };
+
+            map = new google.maps.Map(document.getElementById('map'), mapOptions);
+            updateMapStatus('地图加载成功');
+            console.log('Google Maps initialized successfully');
+        }
+
+        // 清除所有标记
+        function clearMarkers() {
+            markers.forEach(marker => marker.setMap(null));
+            markers = [];
+        }
+
+        // 加载中国设备
+        function loadChinaDevices() {
+            updateMapStatus('正在加载中国设备数据...');
+            fetch('/Home/GetChinaDevices')
+                .then(response => response.json())
+                .then(devices => {
+                    clearMarkers();
+                    currentRegion = 'china';
+
+                    // 设置地图中心到中国
+                    map.setCenter({ lat: 35.0, lng: 105.0 });
+                    map.setZoom(5);
+
+                    devices.forEach(device => {
+                        const position = isChinaMainland
+                            ? { lat: device.gcj02Lat, lng: device.gcj02Lon }
+                            : { lat: device.lat, lng: device.lon };
+
+                        const marker = new google.maps.Marker({
+                            position: position,
+                            map: map,
+                            title: device.sn,
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                scale: 8,
+                                fillColor: '#667eea',
+                                fillOpacity: 0.8,
+                                strokeColor: '#fff',
+                                strokeWeight: 2
+                            }
+                        });
+
+                        const infoWindow = new google.maps.InfoWindow({
+                            content: `
+                                <div style="padding: 10px;">
+                                    <h3 style="margin: 0 0 10px 0; color: #667eea;">${device.sn}</h3>
+                                    <p style="margin: 5px 0;"><strong>纬度:</strong> ${device.lat.toFixed(6)}</p>
+                                    <p style="margin: 5px 0;"><strong>经度:</strong> ${device.lon.toFixed(6)}</p>
+                                    <p style="margin: 5px 0;"><strong>上报时间:</strong> ${new Date(device.reportingTime).toLocaleString('zh-CN')}</p>
+                                </div>
+                            `
+                        });
+
+                        marker.addListener('click', () => {
+                            infoWindow.open(map, marker);
+                        });
+
+                        markers.push(marker);
+                    });
+
+                    updateDeviceCount(devices.length);
+                    updateMapStatus(`成功加载 ${devices.length} 个中国设备`);
+                })
+                .catch(error => {
+                    console.error('Error loading China devices:', error);
+                    updateMapStatus('加载中国设备失败');
+                });
+        }
+
+        // 加载美国设备
+        function loadUSADevices() {
+            updateMapStatus('正在加载美国设备数据...');
+            fetch('/Home/GetUSADevices')
+                .then(response => response.json())
+                .then(devices => {
+                    clearMarkers();
+                    currentRegion = 'usa';
+
+                    // 设置地图中心到美国
+                    map.setCenter({ lat: 39.8283, lng: -98.5795 });
+                    map.setZoom(4);
+
+                    devices.forEach(device => {
+                        const marker = new google.maps.Marker({
+                            position: { lat: device.lat, lng: device.lon },
+                            map: map,
+                            title: device.sn,
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                scale: 8,
+                                fillColor: '#48bb78',
+                                fillOpacity: 0.8,
+                                strokeColor: '#fff',
+                                strokeWeight: 2
+                            }
+                        });
+
+                        const infoWindow = new google.maps.InfoWindow({
+                            content: `
+                                <div style="padding: 10px;">
+                                    <h3 style="margin: 0 0 10px 0; color: #48bb78;">${device.sn}</h3>
+                                    <p style="margin: 5px 0;"><strong>Latitude:</strong> ${device.lat.toFixed(6)}</p>
+                                    <p style="margin: 5px 0;"><strong>Longitude:</strong> ${device.lon.toFixed(6)}</p>
+                                    <p style="margin: 5px 0;"><strong>Reported:</strong> ${new Date(device.reportingTime).toLocaleString('en-US')}</p>
+                                </div>
+                            `
+                        });
+
+                        marker.addListener('click', () => {
+                            infoWindow.open(map, marker);
+                        });
+
+                        markers.push(marker);
+                    });
+
+                    updateDeviceCount(devices.length);
+                    updateMapStatus(`成功加载 ${devices.length} 个美国设备`);
+                })
+                .catch(error => {
+                    console.error('Error loading USA devices:', error);
+                    updateMapStatus('加载美国设备失败');
+                });
+        }
+
+        // 更新设备数量显示
+        function updateDeviceCount(count) {
+            document.getElementById('deviceCount').textContent = count;
+        }
+
+        // 更新地图状态
+        function updateMapStatus(status) {
+            document.getElementById('mapStatus').textContent = status;
+        }
+
+        // 监听中国大陆模式切换
+        document.getElementById('chinaMainlandSwitch').addEventListener('change', function(e) {
+            const isChecked = e.target.checked;
+            isChinaMainland = isChecked;
+
+            const newApiUrl = isChecked
+                ? 'https://maps.google.cn/maps/api/js'
+                : 'https://maps.googleapis.com/maps/api/js';
+
+            document.getElementById('apiUrlStatus').textContent = newApiUrl;
+
+            alert('地图API配置已更改为: ' + newApiUrl + '\n\n请刷新页面以应用新配置。');
+
+            // 如果已经加载了设备，提示重新加载
+            if (currentRegion !== 'none') {
+                if (confirm('是否立即刷新页面以应用新配置？')) {
+                    window.location.href = '/?isChinaMainland=' + isChecked;
+                }
+            }
+        });
+
+        // 动态加载Google Maps API
+        function loadGoogleMapsAPI() {
+            const apiUrl = '@Model.GetMapsApiUrl()';
+            updateMapStatus('正在加载Google Maps API...');
+
+            const script = document.createElement('script');
+            script.src = `${apiUrl}?callback=initMap`;
+            script.async = true;
+            script.defer = true;
+
+            script.onerror = function() {
+                updateMapStatus('❌ Google Maps API加载失败');
+                console.error('Failed to load Google Maps API from:', apiUrl);
+
+                if (!isChinaMainland) {
+                    alert('无法加载Google Maps API。\n\n如果您在中国大陆，请开启"中国大陆模式"开关后刷新页面。');
+                }
+            };
+
+            document.head.appendChild(script);
+        }
+
+        // 页面加载完成后初始化
+        window.addEventListener('load', function() {
+            loadGoogleMapsAPI();
+        });
+    </script>
+</body>
+</html>
